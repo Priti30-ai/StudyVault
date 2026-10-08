@@ -202,6 +202,7 @@ npm test
 | `PUT` | `/api/documents/:id` | Private | Update allowed metadata fields |
 | `PATCH` | `/api/documents/:id/favorite` | Private | Toggle document favorite status |
 | `DELETE` | `/api/documents/:id` | Private | Delete document metadata and S3 object |
+| `GET` | `/api/dashboard/stats` | Private | Fetch aggregated dashboard metrics and analytics |
 | `GET` | `/api/activity` | Private | Fetch user activity history with pagination and action filter |
 
 ---
@@ -376,10 +377,76 @@ Activities represent an append-only audit trail of student actions on documents:
 
 ---
 
-## 11. Security & Ownership Summary
+## 11. Dashboard & Analytics API
+
+### Get Student Dashboard Statistics
+
+* **Method**: `GET /api/dashboard/stats`
+* **Access**: Private (`Authorization: Bearer <token>`)
+* **Purpose**: Computes comprehensive, real-time analytics for the authenticated student using efficient MongoDB aggregation pipelines running in parallel with `Promise.all`.
+* **Security**: Queries strictly enforce `userId: req.userId` with no client-supplied user parameters.
+* **Sections Included**:
+  1. **Overview**: Total documents owned, total storage consumed (in bytes), and total favorited documents.
+  2. **Category Analytics**: Document count breakdown grouped by category, sorted descending.
+  3. **Subject Analytics**: Document count breakdown grouped by subject, sorted descending.
+  4. **Semester Analytics**: Document count breakdown grouped by semester, sorted descending.
+  5. **Recent Documents**: Top 5 latest uploaded documents (excluding internal `s3Key` storage identifiers).
+  6. **Recent Activity**: Top 5 latest actions performed by the student.
+* **Response (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "message": "Dashboard statistics fetched successfully",
+    "data": {
+      "overview": {
+        "totalDocuments": 5,
+        "totalStorageBytes": 1048576,
+        "totalFavorites": 2
+      },
+      "byCategory": [
+        { "category": "Notes", "count": 3 },
+        { "category": "Assignment", "count": 2 }
+      ],
+      "bySubject": [
+        { "subject": "DBMS", "count": 3 },
+        { "subject": "Cloud Computing", "count": 2 }
+      ],
+      "bySemester": [
+        { "semester": "5", "count": 3 },
+        { "semester": "6", "count": 2 }
+      ],
+      "recentDocuments": [
+        {
+          "id": "6ac7b45e1b25622259e008ff",
+          "originalFileName": "DBMS_Unit_3.pdf",
+          "subject": "DBMS",
+          "semester": "5",
+          "category": "Notes",
+          "fileSize": 524288,
+          "mimeType": "application/pdf",
+          "isFavorite": true,
+          "uploadedAt": "2026-10-08T15:45:00.000Z"
+        }
+      ],
+      "recentActivity": [
+        {
+          "id": "6ac7b45e1b25622259e008fe",
+          "documentId": "6ac7b45e1b25622259e008ff",
+          "fileName": "DBMS_Unit_3.pdf",
+          "action": "UPLOAD",
+          "createdAt": "2026-10-08T15:45:00.000Z"
+        }
+      ]
+    }
+  }
+  ```
+
+---
+
+## 12. Security & Ownership Summary
 
 * **Private S3**: Bucket public access is permanently blocked. Files can never be downloaded without passing ownership checks.
-* **Strict Multi-Tenant Isolation**: Queries strictly enforce `userId: req.userId`. User B can never view, favorite, download, or delete User A's documents or activities.
+* **Strict Multi-Tenant Isolation**: Queries strictly enforce `userId: req.userId`. User B can never view, favorite, download, or delete User A's documents, dashboard statistics, or activities.
 * **Non-Blocking Audit Logging**: Activity creation errors never cause primary document operations (uploads, downloads, deletes) to fail.
-* **No Credential Exposure**: Client applications never interact directly with AWS or possess AWS secrets.
+* **Zero Credential Exposure**: Client applications never interact directly with AWS or possess AWS secrets.
 * **Rate Limiting & Security Headers**: Integrated Helmet protection and rate limiting shield all endpoints.
