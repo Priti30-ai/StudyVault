@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 
 import healthRoutes from './routes/health.routes.js';
+import authRoutes from './routes/auth.routes.js';
 import notFoundHandler from './middleware/notFoundHandler.js';
 import errorHandler from './middleware/errorHandler.js';
 
@@ -48,6 +49,7 @@ app.use('/api', generalLimiter);
 
 // API Routes
 app.use('/api/health', healthRoutes);
+app.use('/api/auth', authRoutes);
 
 // 404 Route Handler
 app.use(notFoundHandler);
