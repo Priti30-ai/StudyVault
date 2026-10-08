@@ -6,17 +6,31 @@ Backend service for **StudyVault** — Cloud-Based Student Document & Notes Mana
 
 ## 1. Architecture Overview
 
-Built with Node.js and Express, integrating MongoDB Atlas for document metadata storage and user accounts, with JWT-based authentication, bcrypt password hashing, and user-isolated Document CRUD operations.
+Built with Node.js and Express, implementing a hybrid cloud storage architecture:
+* **MongoDB Atlas**: Stores user accounts and document metadata (file names, sizes, subjects, categories, tags, timestamps).
+* **Amazon S3**: Stores the actual binary files in a private, encrypted bucket.
+
+```text
+                    StudyVault Client
+                           │
+                           ▼
+                  Node.js / Express API
+                           │
+              ┌────────────┴────────────┐
+              ▼                         ▼
+         MongoDB Atlas               AWS S3
+      (Document Metadata)      (Private Object Store)
+```
 
 ```text
 backend/
 ├── src/
-│   ├── config/          # Database connection (db.js)
+│   ├── config/          # Database (db.js) and AWS (aws.js) clients
 │   ├── controllers/     # Auth & Document controllers
-│   ├── middleware/      # Auth, error, rate-limiting & 404 middlewares
+│   ├── middleware/      # Auth, upload, error, rate-limit & 404 middlewares
 │   ├── models/          # Mongoose data schemas (User.js, Document.js)
 │   ├── routes/          # API route definitions (auth, document, health)
-│   ├── services/        # External cloud services (Reserved for AWS S3)
+│   ├── services/        # External cloud services (s3Service.js)
 │   ├── utils/           # Helper utilities (jwt.js, password.js)
 │   ├── app.js           # Express application configuration
 │   └── server.js        # Server listener and database bootstrapper
@@ -34,6 +48,7 @@ backend/
 * **Node.js**: v18.0.0 or higher (v20+ recommended)
 * **npm**: v9.0.0 or higher
 * **MongoDB**: A running local MongoDB instance or a free [MongoDB Atlas](https://www.mongodb.com/atlas) cluster
+* **AWS Account**: An S3 bucket with an IAM user having least-privilege S3 permissions
 
 ---
 
@@ -64,24 +79,70 @@ Configurable variables:
 | `MONGODB_URI` | MongoDB connection string (Local or MongoDB Atlas) | `mongodb+srv://<user>:<password>@cluster0.mongodb.net/studyvault?retryWrites=true&w=majority` |
 | `JWT_SECRET` | Strong secret key for signing JSON Web Tokens | `your_secure_random_jwt_secret_key` |
 | `JWT_EXPIRES_IN`| Token lifespan / expiry duration | `7d` |
+| `AWS_REGION` | AWS region where the S3 bucket is hosted | `ap-south-1` |
+| `AWS_ACCESS_KEY_ID` | IAM User access key ID | `AKIAIOSFODNN7EXAMPLE` |
+| `AWS_SECRET_ACCESS_KEY` | IAM User secret access key | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` |
+| `AWS_S3_BUCKET` | Name of the private S3 bucket | `studyvault-bucket-name` |
 
 > [!CAUTION]
-> Never commit `.env` or expose real database credentials / JWT secrets to Git.
+> Never commit `.env` or expose real database credentials or AWS secrets to Git.
 
 ---
 
-## 5. MongoDB Atlas Setup Guide
+## 5. AWS S3 Setup & Bucket Security
 
-1. Log in to [MongoDB Atlas](https://cloud.mongodb.com).
-2. Create a free shared cluster (e.g. M0 tier).
-3. Under **Security → Database Access**, create a database user with read/write permissions.
-4. Under **Security → Network Access**, add your current IP address (or `0.0.0.0/0` for cloud deployment).
-5. In **Database Deployments**, click **Connect** → **Drivers** (Node.js).
-6. Copy the connection string into your `.env` as `MONGODB_URI` and replace `<password>` with your database user password.
+### S3 Bucket Configuration
+1. Open the [AWS Management Console](https://console.aws.amazon.com/s3/).
+2. Create an S3 Bucket in your desired region (e.g., `ap-south-1`).
+3. **Block Public Access**: Set to **ON** (Enable all 4 public access block settings).
+4. **Bucket Encryption**: Enable SSE-S3 (Server-Side Encryption with Amazon S3 managed keys).
+5. **Object Ownership**: Set to **Bucket owner enforced** (ACLs disabled).
+
+### IAM Permissions Policy (Least Privilege)
+Attach a policy restricting operations to the StudyVault bucket:
+```json
+{
+  "Version": "2012-10-17",
+  "Part": "StudyVaultS3Policy",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::studyvault-bucket-name/*"
+    }
+  ]
+}
+```
 
 ---
 
-## 6. Running Locally
+## 6. S3 Key Partitioning Structure
+
+S3 objects are partitioned hierarchically by authenticated user ID with collision-resistant UUIDs:
+```text
+users/{userId}/{uuid}.{ext}
+```
+*Example*: `users/6ac7b3e8756f9a245201f936/58766975-8cac-49b3-9024-c34db51bbdda.pdf`
+
+This guarantees:
+1. No filename collisions between different users uploading files with the same name (e.g., `Notes.pdf`).
+2. Clean logical isolation per student account.
+
+---
+
+## 7. Two-Phase Upload & Failure Rollback
+
+1. **Upload Phase**: Multer receives the file into a memory buffer and streams it to AWS S3 using `PutObjectCommand`.
+2. **Metadata Phase**: Upon S3 confirmation, document metadata is saved to MongoDB with `s3Key`.
+3. **Rollback Handling**: If MongoDB creation fails after S3 upload succeeds, `s3Service.deleteFile(s3Key)` automatically executes to delete the uploaded S3 object, preventing orphaned storage files.
+
+---
+
+## 8. Running Locally
 
 ### Development Mode (with hot reload via nodemon)
 
@@ -103,40 +164,7 @@ npm test
 
 ---
 
-## 7. Data Models
-
-### User Schema
-
-* `name`: String, required, trimmed, min 2 / max 50 chars.
-* `email`: String, required, trimmed, lowercase, unique, regex email validation.
-* `passwordHash`: String, required (hashed with bcrypt).
-* `timestamps`: `createdAt`, `updatedAt`.
-
-### Document Schema
-
-* `userId`: ObjectId (ref: User), required, indexed.
-* `originalFileName`: String, required, trimmed.
-* `s3Key`: String (optional, reserved for S3 phase).
-* `fileType`: String (e.g., `pdf`, `docx`, `pptx`).
-* `mimeType`: String (e.g., `application/pdf`).
-* `fileSize`: Number (in bytes).
-* `subject`: String, required, trimmed.
-* `semester`: String, required, trimmed.
-* `category`: String, required, enum: `['Notes', 'Assignment', 'Question Paper', 'Practical', 'PPT', 'Reference', 'Other']`.
-* `tags`: Array of strings, trimmed and deduplicated.
-* `isFavorite`: Boolean, default `false`.
-* `uploadedAt`: Date, default `Date.now`.
-* `timestamps`: `createdAt`, `updatedAt`.
-
-**Compound Indexes**:
-* `{ userId: 1, subject: 1 }`
-* `{ userId: 1, semester: 1 }`
-* `{ userId: 1, category: 1 }`
-* `{ userId: 1, uploadedAt: -1 }`
-
----
-
-## 8. API Contract & Endpoints
+## 9. API Contract & Endpoints
 
 ### Standard Response Format
 
@@ -159,217 +187,86 @@ npm test
 
 ---
 
-### Authentication Endpoints
+### Endpoints Table
 
-#### 1. Service Health Check
-
-* **Method**: `GET /api/health`
-* **Access**: Public
-* **Response (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "message": "StudyVault API is healthy"
-  }
-  ```
-
-#### 2. Register New User
-
-* **Method**: `POST /api/auth/register`
-* **Access**: Public
-* **Request Body**:
-  ```json
-  {
-    "name": "Priti Ahire",
-    "email": "priti@example.com",
-    "password": "StrongPassword123"
-  }
-  ```
-* **Response (201 Created)**:
-  ```json
-  {
-    "success": true,
-    "message": "Registration successful",
-    "data": {
-      "user": {
-        "id": "67a3f892b1234c0012ef4567",
-        "name": "Priti Ahire",
-        "email": "priti@example.com"
-      },
-      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-    }
-  }
-  ```
-
-#### 3. Log In
-
-* **Method**: `POST /api/auth/login`
-* **Access**: Public
-* **Request Body**:
-  ```json
-  {
-    "email": "priti@example.com",
-    "password": "StrongPassword123"
-  }
-  ```
-* **Response (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "message": "Login successful",
-    "data": {
-      "user": {
-        "id": "67a3f892b1234c0012ef4567",
-        "name": "Priti Ahire",
-        "email": "priti@example.com"
-      },
-      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-    }
-  }
-  ```
-
-#### 4. Get Current User (`Me`)
-
-* **Method**: `GET /api/auth/me`
-* **Access**: Private (Requires `Authorization: Bearer <token>`)
-* **Response (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "message": "Current user retrieved successfully",
-    "data": {
-      "user": {
-        "id": "67a3f892b1234c0012ef4567",
-        "name": "Priti Ahire",
-        "email": "priti@example.com"
-      }
-    }
-  }
-  ```
+| Method | Endpoint | Access | Description |
+| --- | --- | --- | --- |
+| `GET` | `/api/health` | Public | Service health status |
+| `POST` | `/api/auth/register` | Public | Register student account |
+| `POST` | `/api/auth/login` | Public | Log in & receive JWT |
+| `GET` | `/api/auth/me` | Private | Retrieve authenticated student profile |
+| `POST` | `/api/documents` | Private | Upload document file (multipart/form-data) |
+| `GET` | `/api/documents` | Private | List documents with search, filters, and pagination |
+| `GET` | `/api/documents/:id` | Private | Retrieve single document metadata |
+| `GET` | `/api/documents/:id/download` | Private | Generate temporary presigned S3 download URL |
+| `PUT` | `/api/documents/:id` | Private | Update allowed metadata fields |
+| `DELETE` | `/api/documents/:id` | Private | Delete document metadata and S3 object |
 
 ---
 
-### Document Endpoints (Protected by JWT)
+### Document Endpoints Details
 
-#### 5. Create Document Metadata
+#### 1. Upload File & Metadata
 
 * **Method**: `POST /api/documents`
 * **Access**: Private (`Authorization: Bearer <token>`)
-* **Request Body**:
-  ```json
-  {
-    "originalFileName": "DBMS_Unit_3_Notes.pdf",
-    "subject": "DBMS",
-    "semester": "3",
-    "category": "Notes",
-    "tags": ["mongodb", "sql", "normalization"],
-    "fileType": "pdf",
-    "mimeType": "application/pdf",
-    "fileSize": 524288
-  }
-  ```
+* **Content-Type**: `multipart/form-data`
+* **Supported File Types**: `.pdf`, `.doc`, `.docx`, `.ppt`, `.pptx`, `.jpg`, `.jpeg`, `.png`
+* **Maximum File Size**: 10 MB
+* **Form Fields**:
+  * `file`: Binary file (required)
+  * `subject`: Subject name (required)
+  * `semester`: Academic semester (required)
+  * `category`: `Notes` \| `Assignment` \| `Question Paper` \| `Practical` \| `PPT` \| `Reference` \| `Other` (required)
+  * `tags`: Comma-separated list or JSON array (optional)
 * **Response (201 Created)**:
   ```json
   {
     "success": true,
-    "message": "Document created successfully",
+    "message": "Document uploaded successfully",
     "data": {
       "document": {
-        "id": "67a4d1a0b1234c0012ef7890",
-        "userId": "67a3f892b1234c0012ef4567",
-        "originalFileName": "DBMS_Unit_3_Notes.pdf",
-        "subject": "DBMS",
-        "semester": "3",
+        "id": "6ac7b3e8756f9a245201f937",
+        "userId": "6ac7b3e8756f9a245201f936",
+        "originalFileName": "Cloud_Architecture_Notes.pdf",
+        "s3Key": "users/6ac7b3e8756f9a245201f936/58766975-8cac-49b3-9024-c34db51bbdda.pdf",
+        "fileType": "pdf",
+        "mimeType": "application/pdf",
+        "fileSize": 524288,
+        "subject": "Cloud Computing",
+        "semester": "6",
         "category": "Notes",
-        "tags": ["mongodb", "sql", "normalization"],
+        "tags": ["aws", "s3", "cloud"],
         "isFavorite": false,
-        "uploadedAt": "2026-10-08T15:00:00.000Z",
-        "createdAt": "2026-10-08T15:00:00.000Z",
-        "updatedAt": "2026-10-08T15:00:00.000Z"
+        "uploadedAt": "2026-10-08T15:16:56.285Z"
       }
     }
   }
   ```
 
-#### 6. List Documents with Search, Filters & Pagination
+#### 2. Generate Presigned Download URL
 
-* **Method**: `GET /api/documents`
+* **Method**: `GET /api/documents/:id/download`
 * **Access**: Private (`Authorization: Bearer <token>`)
-* **Query Parameters**:
-  * `search`: Case-insensitive search across file name, subject, or tags (`?search=sql`)
-  * `subject`: Filter by subject (`?subject=DBMS`)
-  * `semester`: Filter by semester (`?semester=3`)
-  * `category`: Filter by category (`?category=Notes`)
-  * `page`: Page number (default: `1`)
-  * `limit`: Items per page (default: `10`, max: `50`)
-  * *Combined Example*: `GET /api/documents?search=normalization&subject=DBMS&semester=3&category=Notes&page=1&limit=10`
+* **Behavior**: Generates a short-lived presigned URL (valid for 300 seconds) enabling the browser to directly stream the private file from S3 without exposing AWS credentials.
 * **Response (200 OK)**:
   ```json
   {
     "success": true,
-    "message": "Documents retrieved successfully",
+    "message": "Download URL generated successfully",
     "data": {
-      "documents": [ ... ],
-      "pagination": {
-        "page": 1,
-        "limit": 10,
-        "total": 25,
-        "totalPages": 3
-      }
+      "downloadUrl": "https://studyvault-bucket.s3.ap-south-1.amazonaws.com/users/...?...X-Amz-Signature=...",
+      "expiresIn": 300
     }
   }
   ```
+* **Response (404 Not Found)**: If document does not exist or belongs to another user.
 
-#### 7. Get Single Document
-
-* **Method**: `GET /api/documents/:id`
-* **Access**: Private (`Authorization: Bearer <token>`)
-* **Response (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "message": "Document retrieved successfully",
-    "data": {
-      "document": { ... }
-    }
-  }
-  ```
-* **Response (404 Not Found)**:
-  ```json
-  {
-    "success": false,
-    "message": "Document not found"
-  }
-  ```
-
-#### 8. Update Document Metadata
-
-* **Method**: `PUT /api/documents/:id`
-* **Access**: Private (`Authorization: Bearer <token>`)
-* **Allowed Update Fields**: `originalFileName`, `subject`, `semester`, `category`, `tags`
-* **Request Body**:
-  ```json
-  {
-    "originalFileName": "DBMS_Unit_3_Final.pdf",
-    "category": "Reference",
-    "tags": ["sql", "normalization", "transactions"]
-  }
-  ```
-* **Response (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "message": "Document updated successfully",
-    "data": {
-      "document": { ... }
-    }
-  }
-  ```
-
-#### 9. Delete Document Metadata
+#### 3. Delete Document & Storage Object
 
 * **Method**: `DELETE /api/documents/:id`
 * **Access**: Private (`Authorization: Bearer <token>`)
+* **Behavior**: Deletes the file from Amazon S3 and removes the metadata record from MongoDB.
 * **Response (200 OK)**:
   ```json
   {
@@ -381,12 +278,9 @@ npm test
 
 ---
 
-## 9. Security & Ownership Enforcement
+## 10. Security & Ownership Summary
 
-* **Strict User Isolation**: Every document query strictly incorporates `userId: req.userId`. Users can never access, list, modify, or delete another user's documents.
-* **Information Leakage Prevention**: Attempting to query, update, or delete another user's document returns a generic `404 Document not found` rather than revealing document existence.
-* **Spoofing Prevention**: `userId` is pulled directly from the verified JWT token (`req.userId`); any `userId` sent in the request body is discarded.
-* **Protected Immutability**: Critical fields (`userId`, `s3Key`, `uploadedAt`, `createdAt`) are protected from updates via `PUT /api/documents/:id`.
-* **Password Security**: Passwords hashed with `bcryptjs` (10 salt rounds); raw passwords never stored or logged.
-* **Rate Limiting**: Integrated `express-rate-limit` prevents brute-force traffic (bypassed in test environment).
-* **HTTP Security**: Enforced using `helmet` headers and strict CORS origin matching against `CLIENT_URL`.
+* **Private S3**: Bucket public access is permanently blocked. Files can never be downloaded without passing ownership checks.
+* **Strict Multi-Tenant Isolation**: Queries strictly check `_id: id, userId: req.userId`. User B cannot generate download URLs or delete User A's documents.
+* **No Credential Exposure**: Client applications never interact directly with AWS or possess AWS secrets.
+* **Rate Limiting & Security Headers**: Integrated Helmet protection and rate limiting shield all endpoints.

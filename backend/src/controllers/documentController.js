@@ -1,5 +1,7 @@
+import path from 'path';
 import mongoose from 'mongoose';
 import Document, { ALLOWED_CATEGORIES } from '../models/Document.js';
+import s3Service from '../services/s3Service.js';
 
 /**
  * Escapes regular expression special characters to prevent regex injection
@@ -9,32 +11,45 @@ const escapeRegex = (string) => {
 };
 
 /**
- * Create a new document metadata record
+ * Parses and normalizes tags from either string or array input
+ */
+const normalizeTagsInput = (tags) => {
+  if (!tags) return [];
+  if (Array.isArray(tags)) {
+    return [...new Set(tags.map((t) => String(t).trim()).filter(Boolean))];
+  }
+  if (typeof tags === 'string') {
+    try {
+      const parsed = JSON.parse(tags);
+      if (Array.isArray(parsed)) {
+        return [...new Set(parsed.map((t) => String(t).trim()).filter(Boolean))];
+      }
+    } catch {
+      // Not JSON, treat as comma-separated values
+    }
+    return [...new Set(tags.split(',').map((t) => t.trim()).filter(Boolean))];
+  }
+  return [];
+};
+
+/**
+ * Upload document file to S3 and save metadata in MongoDB
  * @route POST /api/documents
  * @access Private
  */
 export const createDocument = async (req, res, next) => {
   try {
-    const {
-      originalFileName,
-      subject,
-      semester,
-      category,
-      tags,
-      fileType,
-      mimeType,
-      fileSize,
-      s3Key
-    } = req.body;
-
-    // Validate required fields
-    if (!originalFileName || typeof originalFileName !== 'string' || !originalFileName.trim()) {
+    // Validate file presence
+    if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: 'Original file name is required'
+        message: 'File is required'
       });
     }
 
+    const { subject, semester, category, tags } = req.body;
+
+    // Validate metadata fields
     if (!subject || typeof subject !== 'string' || !subject.trim()) {
       return res.status(400).json({
         success: false,
@@ -56,36 +71,57 @@ export const createDocument = async (req, res, next) => {
       });
     }
 
-    // Validate tags if provided
-    if (tags !== undefined && !Array.isArray(tags)) {
-      return res.status(400).json({
+    const originalFileName = req.file.originalname;
+    const mimeType = req.file.mimetype;
+    const fileSize = req.file.size;
+    const fileType = path.extname(originalFileName).replace('.', '').toLowerCase();
+    const normalizedTags = normalizeTagsInput(tags);
+
+    // Step 1: Upload binary file to AWS S3
+    let uploadResult;
+    try {
+      uploadResult = await s3Service.uploadFile({
+        fileBuffer: req.file.buffer,
+        originalFileName,
+        mimeType,
+        userId: req.userId
+      });
+    } catch (s3Error) {
+      console.error('S3 Upload Error:', s3Error);
+      return res.status(500).json({
         success: false,
-        message: 'Tags must be an array of strings'
+        message: 'File upload to storage failed'
       });
     }
 
-    // Clean and normalize tags
-    const normalizedTags = Array.isArray(tags)
-      ? [...new Set(tags.map((t) => String(t).trim()).filter(Boolean))]
-      : [];
-
-    // Create document scoped to authenticated user
-    const document = await Document.create({
-      userId: req.userId,
-      originalFileName: originalFileName.trim(),
-      subject: subject.trim(),
-      semester: semester.trim(),
-      category,
-      tags: normalizedTags,
-      fileType: fileType ? String(fileType).trim().toLowerCase() : null,
-      mimeType: mimeType ? String(mimeType).trim().toLowerCase() : null,
-      fileSize: typeof fileSize === 'number' ? fileSize : null,
-      s3Key: s3Key ? String(s3Key).trim() : null
-    });
+    // Step 2: Create MongoDB document record
+    let document;
+    try {
+      document = await Document.create({
+        userId: req.userId,
+        originalFileName,
+        s3Key: uploadResult.s3Key,
+        fileType,
+        mimeType,
+        fileSize,
+        subject: subject.trim(),
+        semester: semester.trim(),
+        category,
+        tags: normalizedTags
+      });
+    } catch (dbError) {
+      // Rollback: delete S3 object to prevent orphaned storage files
+      try {
+        await s3Service.deleteFile(uploadResult.s3Key);
+      } catch (cleanupError) {
+        console.error('Failed to cleanup S3 object after DB error:', cleanupError);
+      }
+      throw dbError;
+    }
 
     return res.status(201).json({
       success: true,
-      message: 'Document created successfully',
+      message: 'Document uploaded successfully',
       data: {
         document
       }
@@ -96,7 +132,7 @@ export const createDocument = async (req, res, next) => {
 };
 
 /**
- * List documents for the authenticated user with search, filter, and pagination
+ * List documents for authenticated user with search, filter, and pagination
  * @route GET /api/documents
  * @access Private
  */
@@ -104,27 +140,22 @@ export const getDocuments = async (req, res, next) => {
   try {
     const { search, subject, semester, category, page = 1, limit = 10 } = req.query;
 
-    // Strict ownership boundary: filter by req.userId
     const queryFilter = {
       userId: req.userId
     };
 
-    // Filter by subject
     if (subject && typeof subject === 'string' && subject.trim()) {
       queryFilter.subject = new RegExp(`^${escapeRegex(subject.trim())}$`, 'i');
     }
 
-    // Filter by semester
     if (semester && typeof semester === 'string' && semester.trim()) {
       queryFilter.semester = semester.trim();
     }
 
-    // Filter by category
     if (category && typeof category === 'string' && category.trim()) {
       queryFilter.category = category.trim();
     }
 
-    // Search query across originalFileName, subject, and tags
     if (search && typeof search === 'string' && search.trim()) {
       const searchRegex = new RegExp(escapeRegex(search.trim()), 'i');
       queryFilter.$or = [
@@ -134,12 +165,10 @@ export const getDocuments = async (req, res, next) => {
       ];
     }
 
-    // Parse and bound pagination parameters
     const parsedPage = Math.max(1, parseInt(page, 10) || 1);
     const parsedLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
     const skip = (parsedPage - 1) * parsedLimit;
 
-    // Fetch total and paginated documents
     const total = await Document.countDocuments(queryFilter);
     const documents = await Document.find(queryFilter)
       .sort({ uploadedAt: -1 })
@@ -207,6 +236,58 @@ export const getDocumentById = async (req, res, next) => {
 };
 
 /**
+ * Generate a temporary presigned download URL for a document file
+ * @route GET /api/documents/:id/download
+ * @access Private
+ */
+export const getDownloadUrl = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Document not found'
+      });
+    }
+
+    // Ownership verification: query by both documentId and req.userId
+    const document = await Document.findOne({
+      _id: id,
+      userId: req.userId
+    });
+
+    if (!document) {
+      return res.status(404).json({
+        success: false,
+        message: 'Document not found'
+      });
+    }
+
+    if (!document.s3Key) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found for this document'
+      });
+    }
+
+    const expiresIn = 300; // 5 minutes
+    const downloadUrl = await s3Service.generateDownloadUrl(document.s3Key, expiresIn);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Download URL generated successfully',
+      data: {
+        downloadUrl,
+        expiresIn
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Update document metadata
  * @route PUT /api/documents/:id
  * @access Private
@@ -236,7 +317,6 @@ export const updateDocument = async (req, res, next) => {
 
     const { originalFileName, subject, semester, category, tags } = req.body;
 
-    // Validate and apply allowed modifications
     if (originalFileName !== undefined) {
       if (typeof originalFileName !== 'string' || !originalFileName.trim()) {
         return res.status(400).json({
@@ -278,13 +358,7 @@ export const updateDocument = async (req, res, next) => {
     }
 
     if (tags !== undefined) {
-      if (!Array.isArray(tags)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Tags must be an array of strings'
-        });
-      }
-      document.tags = [...new Set(tags.map((t) => String(t).trim()).filter(Boolean))];
+      document.tags = normalizeTagsInput(tags);
     }
 
     await document.save();
@@ -302,7 +376,7 @@ export const updateDocument = async (req, res, next) => {
 };
 
 /**
- * Delete a document metadata record
+ * Delete document metadata and corresponding S3 storage object
  * @route DELETE /api/documents/:id
  * @access Private
  */
@@ -317,7 +391,7 @@ export const deleteDocument = async (req, res, next) => {
       });
     }
 
-    const document = await Document.findOneAndDelete({
+    const document = await Document.findOne({
       _id: id,
       userId: req.userId
     });
@@ -328,6 +402,22 @@ export const deleteDocument = async (req, res, next) => {
         message: 'Document not found'
       });
     }
+
+    // Delete S3 object if present
+    if (document.s3Key) {
+      try {
+        await s3Service.deleteFile(document.s3Key);
+      } catch (s3Error) {
+        console.error('Error deleting S3 file:', s3Error);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to delete file from storage'
+        });
+      }
+    }
+
+    // Delete MongoDB metadata
+    await Document.deleteOne({ _id: id, userId: req.userId });
 
     return res.status(200).json({
       success: true,
@@ -343,6 +433,7 @@ export default {
   createDocument,
   getDocuments,
   getDocumentById,
+  getDownloadUrl,
   updateDocument,
   deleteDocument
 };

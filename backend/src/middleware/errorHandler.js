@@ -3,6 +3,14 @@
  * Catches unhandled errors, logs debugging info in development, and returns standardized response
  */
 export const errorHandler = (err, req, res, next) => {
+  // Handle Multer file size limit error
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({
+      success: false,
+      message: 'File size exceeds the 10 MB limit'
+    });
+  }
+
   const statusCode = err.statusCode || err.status || 500;
 
   // Log error on server for debugging

@@ -3,10 +3,12 @@ import {
   createDocument,
   getDocuments,
   getDocumentById,
+  getDownloadUrl,
   updateDocument,
   deleteDocument
 } from '../controllers/documentController.js';
 import { authMiddleware } from '../middleware/authMiddleware.js';
+import upload from '../middleware/uploadMiddleware.js';
 
 const router = Router();
 
@@ -15,10 +17,10 @@ router.use(authMiddleware);
 
 /**
  * @route   POST /api/documents
- * @desc    Create a new document metadata record
+ * @desc    Upload document file to S3 and save metadata in MongoDB
  * @access  Private
  */
-router.post('/', createDocument);
+router.post('/', upload.single('file'), createDocument);
 
 /**
  * @route   GET /api/documents
@@ -35,6 +37,13 @@ router.get('/', getDocuments);
 router.get('/:id', getDocumentById);
 
 /**
+ * @route   GET /api/documents/:id/download
+ * @desc    Generate a presigned S3 download URL
+ * @access  Private
+ */
+router.get('/:id/download', getDownloadUrl);
+
+/**
  * @route   PUT /api/documents/:id
  * @desc    Update document metadata
  * @access  Private
@@ -43,7 +52,7 @@ router.put('/:id', updateDocument);
 
 /**
  * @route   DELETE /api/documents/:id
- * @desc    Delete a document metadata record
+ * @desc    Delete a document from MongoDB and S3
  * @access  Private
  */
 router.delete('/:id', deleteDocument);
