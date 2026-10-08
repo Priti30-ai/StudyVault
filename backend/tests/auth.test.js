@@ -10,6 +10,7 @@ const TEST_MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/s
 
 describe('Authentication API Suite', () => {
   before(async () => {
+    process.env.NODE_ENV = 'test';
     process.env.JWT_SECRET = 'studyvault_test_jwt_secret_key';
     process.env.JWT_EXPIRES_IN = '1d';
     if (mongoose.connection.readyState === 0) {

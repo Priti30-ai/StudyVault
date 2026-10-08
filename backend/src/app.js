@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 
 import healthRoutes from './routes/health.routes.js';
 import authRoutes from './routes/auth.routes.js';
+import documentRoutes from './routes/document.routes.js';
 import notFoundHandler from './middleware/notFoundHandler.js';
 import errorHandler from './middleware/errorHandler.js';
 
@@ -38,6 +39,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
+  skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -50,6 +52,7 @@ app.use('/api', generalLimiter);
 // API Routes
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/documents', documentRoutes);
 
 // 404 Route Handler
 app.use(notFoundHandler);

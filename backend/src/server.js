@@ -19,6 +19,7 @@ const startServer = async () => {
       console.log(`⚙️  Environment: ${NODE_ENV}`);
       console.log(`🩺 Health: http://localhost:${PORT}/api/health`);
       console.log(`🔐 Auth: http://localhost:${PORT}/api/auth`);
+      console.log(`📄 Documents: http://localhost:${PORT}/api/documents`);
       console.log(`=========================================`);
     });
   } catch (error) {
