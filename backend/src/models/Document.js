@@ -84,6 +84,7 @@ const documentSchema = new mongoose.Schema(
 documentSchema.index({ userId: 1, subject: 1 });
 documentSchema.index({ userId: 1, semester: 1 });
 documentSchema.index({ userId: 1, category: 1 });
+documentSchema.index({ userId: 1, isFavorite: 1 });
 documentSchema.index({ userId: 1, uploadedAt: -1 });
 
 // Helper to normalize and deduplicate tags

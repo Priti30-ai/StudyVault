@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import app from '../src/app.js';
 import User from '../src/models/User.js';
 import Document from '../src/models/Document.js';
+import Activity from '../src/models/Activity.js';
 import { setS3Mock, generateS3Key } from '../src/services/s3Service.js';
 
 const TEST_MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/studyvault_test';
@@ -46,6 +47,7 @@ describe('Document CRUD and AWS S3 File Storage Suite', () => {
   after(async () => {
     setS3Mock(null);
     if (mongoose.connection.readyState !== 0) {
+      await Activity.deleteMany({});
       await Document.deleteMany({});
       await User.deleteMany({});
       await mongoose.disconnect();
@@ -54,6 +56,7 @@ describe('Document CRUD and AWS S3 File Storage Suite', () => {
 
   beforeEach(async () => {
     mockS3Storage.clear();
+    await Activity.deleteMany({});
     await Document.deleteMany({});
     await User.deleteMany({});
 

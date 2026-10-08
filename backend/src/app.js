@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit';
 import healthRoutes from './routes/health.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import documentRoutes from './routes/document.routes.js';
+import activityRoutes from './routes/activity.routes.js';
 import notFoundHandler from './middleware/notFoundHandler.js';
 import errorHandler from './middleware/errorHandler.js';
 
@@ -53,6 +54,7 @@ app.use('/api', generalLimiter);
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/documents', documentRoutes);
+app.use('/api/activity', activityRoutes);
 
 // 404 Route Handler
 app.use(notFoundHandler);

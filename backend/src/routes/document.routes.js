@@ -5,7 +5,8 @@ import {
   getDocumentById,
   getDownloadUrl,
   updateDocument,
-  deleteDocument
+  deleteDocument,
+  toggleFavorite
 } from '../controllers/documentController.js';
 import { authMiddleware } from '../middleware/authMiddleware.js';
 import upload from '../middleware/uploadMiddleware.js';
@@ -49,6 +50,13 @@ router.get('/:id/download', getDownloadUrl);
  * @access  Private
  */
 router.put('/:id', updateDocument);
+
+/**
+ * @route   PATCH /api/documents/:id/favorite
+ * @desc    Toggle document favorite status
+ * @access  Private
+ */
+router.patch('/:id/favorite', toggleFavorite);
 
 /**
  * @route   DELETE /api/documents/:id

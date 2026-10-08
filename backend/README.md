@@ -196,11 +196,13 @@ npm test
 | `POST` | `/api/auth/login` | Public | Log in & receive JWT |
 | `GET` | `/api/auth/me` | Private | Retrieve authenticated student profile |
 | `POST` | `/api/documents` | Private | Upload document file (multipart/form-data) |
-| `GET` | `/api/documents` | Private | List documents with search, filters, and pagination |
+| `GET` | `/api/documents` | Private | List documents with search, filters, favorites, and pagination |
 | `GET` | `/api/documents/:id` | Private | Retrieve single document metadata |
 | `GET` | `/api/documents/:id/download` | Private | Generate temporary presigned S3 download URL |
 | `PUT` | `/api/documents/:id` | Private | Update allowed metadata fields |
+| `PATCH` | `/api/documents/:id/favorite` | Private | Toggle document favorite status |
 | `DELETE` | `/api/documents/:id` | Private | Delete document metadata and S3 object |
+| `GET` | `/api/activity` | Private | Fetch user activity history with pagination and action filter |
 
 ---
 
@@ -262,11 +264,43 @@ npm test
   ```
 * **Response (404 Not Found)**: If document does not exist or belongs to another user.
 
-#### 3. Delete Document & Storage Object
+#### 3. Toggle Favorite Status
+
+* **Method**: `PATCH /api/documents/:id/favorite`
+* **Access**: Private (`Authorization: Bearer <token>`)
+* **Behavior**: Toggles the `isFavorite` flag on the specified document. Automatically records a `FAVORITE` or `UNFAVORITE` activity.
+* **Response (200 OK - Favorited)**:
+  ```json
+  {
+    "success": true,
+    "message": "Document favorited successfully",
+    "data": {
+      "document": {
+        "id": "6ac7b3e8756f9a245201f937",
+        "isFavorite": true
+      }
+    }
+  }
+  ```
+* **Response (200 OK - Unfavorited)**:
+  ```json
+  {
+    "success": true,
+    "message": "Document unfavorited successfully",
+    "data": {
+      "document": {
+        "id": "6ac7b3e8756f9a245201f937",
+        "isFavorite": false
+      }
+    }
+  }
+  ```
+
+#### 4. Delete Document & Storage Object
 
 * **Method**: `DELETE /api/documents/:id`
 * **Access**: Private (`Authorization: Bearer <token>`)
-* **Behavior**: Deletes the file from Amazon S3 and removes the metadata record from MongoDB.
+* **Behavior**: Deletes the file from Amazon S3 and removes the metadata record from MongoDB. Automatically records a `DELETE` activity that persists in the audit trail.
 * **Response (200 OK)**:
   ```json
   {
@@ -278,9 +312,74 @@ npm test
 
 ---
 
-## 10. Security & Ownership Summary
+## 10. Activity Tracking API
+
+### Activity Model Schema
+Activities represent an append-only audit trail of student actions on documents:
+* `userId`: ObjectId (ref: `User`, indexed, required)
+* `documentId`: ObjectId (ref: `Document`, required)
+* `action`: String enum (`UPLOAD`, `DOWNLOAD`, `DELETE`, `FAVORITE`, `UNFAVORITE`, `UPDATE`)
+* `fileName`: String (stored at log time so record persists even if document is deleted)
+* `createdAt`: Date (default: `Date.now`, indexed)
+
+### Get User Activity History
+
+* **Method**: `GET /api/activity`
+* **Access**: Private (`Authorization: Bearer <token>`)
+* **Query Parameters**:
+  * `page`: Page number (default: `1`)
+  * `limit`: Page size (default: `10`, max: `50`)
+  * `action`: Filter by action type (`UPLOAD`, `DOWNLOAD`, `DELETE`, `FAVORITE`, `UNFAVORITE`, `UPDATE`)
+* **Sorting**: Sorted newest first (`createdAt: -1`)
+* **Response (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "message": "Activity fetched successfully",
+    "data": {
+      "activities": [
+        {
+          "id": "6ac7b45e1b25622259e008ff",
+          "userId": "6ac7b3e8756f9a245201f936",
+          "documentId": "6ac7b3e8756f9a245201f937",
+          "action": "FAVORITE",
+          "fileName": "Cloud_Architecture_Notes.pdf",
+          "createdAt": "2026-10-08T15:35:10.120Z"
+        },
+        {
+          "id": "6ac7b45e1b25622259e008fe",
+          "userId": "6ac7b3e8756f9a245201f936",
+          "documentId": "6ac7b3e8756f9a245201f937",
+          "action": "DOWNLOAD",
+          "fileName": "Cloud_Architecture_Notes.pdf",
+          "createdAt": "2026-10-08T15:34:02.450Z"
+        },
+        {
+          "id": "6ac7b45e1b25622259e008fd",
+          "userId": "6ac7b3e8756f9a245201f936",
+          "documentId": "6ac7b3e8756f9a245201f937",
+          "action": "UPLOAD",
+          "fileName": "Cloud_Architecture_Notes.pdf",
+          "createdAt": "2026-10-08T15:33:00.000Z"
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "limit": 10,
+        "total": 3,
+        "pages": 1,
+        "totalPages": 1
+      }
+    }
+  }
+  ```
+
+---
+
+## 11. Security & Ownership Summary
 
 * **Private S3**: Bucket public access is permanently blocked. Files can never be downloaded without passing ownership checks.
-* **Strict Multi-Tenant Isolation**: Queries strictly check `_id: id, userId: req.userId`. User B cannot generate download URLs or delete User A's documents.
+* **Strict Multi-Tenant Isolation**: Queries strictly enforce `userId: req.userId`. User B can never view, favorite, download, or delete User A's documents or activities.
+* **Non-Blocking Audit Logging**: Activity creation errors never cause primary document operations (uploads, downloads, deletes) to fail.
 * **No Credential Exposure**: Client applications never interact directly with AWS or possess AWS secrets.
 * **Rate Limiting & Security Headers**: Integrated Helmet protection and rate limiting shield all endpoints.

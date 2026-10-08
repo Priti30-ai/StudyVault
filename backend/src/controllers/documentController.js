@@ -2,6 +2,7 @@ import path from 'path';
 import mongoose from 'mongoose';
 import Document, { ALLOWED_CATEGORIES } from '../models/Document.js';
 import s3Service from '../services/s3Service.js';
+import activityService from '../services/activityService.js';
 
 /**
  * Escapes regular expression special characters to prevent regex injection
@@ -119,6 +120,14 @@ export const createDocument = async (req, res, next) => {
       throw dbError;
     }
 
+    // Record UPLOAD activity (failure will not disrupt successful upload)
+    await activityService.createActivity({
+      userId: req.userId,
+      documentId: document._id,
+      action: 'UPLOAD',
+      fileName: document.originalFileName
+    });
+
     return res.status(201).json({
       success: true,
       message: 'Document uploaded successfully',
@@ -138,11 +147,17 @@ export const createDocument = async (req, res, next) => {
  */
 export const getDocuments = async (req, res, next) => {
   try {
-    const { search, subject, semester, category, page = 1, limit = 10 } = req.query;
+    const { search, subject, semester, category, favorite, page = 1, limit = 10 } = req.query;
 
     const queryFilter = {
       userId: req.userId
     };
+
+    if (favorite === 'true') {
+      queryFilter.isFavorite = true;
+    } else if (favorite === 'false') {
+      queryFilter.isFavorite = false;
+    }
 
     if (subject && typeof subject === 'string' && subject.trim()) {
       queryFilter.subject = new RegExp(`^${escapeRegex(subject.trim())}$`, 'i');
@@ -274,6 +289,14 @@ export const getDownloadUrl = async (req, res, next) => {
     const expiresIn = 300; // 5 minutes
     const downloadUrl = await s3Service.generateDownloadUrl(document.s3Key, expiresIn);
 
+    // Record DOWNLOAD activity
+    await activityService.createActivity({
+      userId: req.userId,
+      documentId: document._id,
+      action: 'DOWNLOAD',
+      fileName: document.originalFileName
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Download URL generated successfully',
@@ -363,6 +386,14 @@ export const updateDocument = async (req, res, next) => {
 
     await document.save();
 
+    // Record UPDATE activity
+    await activityService.createActivity({
+      userId: req.userId,
+      documentId: document._id,
+      action: 'UPDATE',
+      fileName: document.originalFileName
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Document updated successfully',
@@ -403,6 +434,11 @@ export const deleteDocument = async (req, res, next) => {
       });
     }
 
+    // Preserve document metadata before deletion for activity logging
+    const documentId = document._id;
+    const fileName = document.originalFileName;
+    const userId = document.userId;
+
     // Delete S3 object if present
     if (document.s3Key) {
       try {
@@ -419,10 +455,75 @@ export const deleteDocument = async (req, res, next) => {
     // Delete MongoDB metadata
     await Document.deleteOne({ _id: id, userId: req.userId });
 
+    // Record DELETE activity (only after deletion succeeds)
+    await activityService.createActivity({
+      userId,
+      documentId,
+      action: 'DELETE',
+      fileName
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Document deleted successfully',
       data: {}
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Toggle favorite status of a document
+ * @route PATCH /api/documents/:id/favorite
+ * @access Private
+ */
+export const toggleFavorite = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Document not found'
+      });
+    }
+
+    const document = await Document.findOne({
+      _id: id,
+      userId: req.userId
+    });
+
+    if (!document) {
+      return res.status(404).json({
+        success: false,
+        message: 'Document not found'
+      });
+    }
+
+    const newFavoriteState = !document.isFavorite;
+    document.isFavorite = newFavoriteState;
+    await document.save();
+
+    const action = newFavoriteState ? 'FAVORITE' : 'UNFAVORITE';
+    const message = newFavoriteState
+      ? 'Document favorited successfully'
+      : 'Document unfavorited successfully';
+
+    // Record activity non-blockingly
+    await activityService.createActivity({
+      userId: req.userId,
+      documentId: document._id,
+      action,
+      fileName: document.originalFileName
+    });
+
+    return res.status(200).json({
+      success: true,
+      message,
+      data: {
+        document
+      }
     });
   } catch (error) {
     next(error);
@@ -435,5 +536,6 @@ export default {
   getDocumentById,
   getDownloadUrl,
   updateDocument,
-  deleteDocument
+  deleteDocument,
+  toggleFavorite
 };
