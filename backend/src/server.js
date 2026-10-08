@@ -12,7 +12,7 @@ const startServer = async () => {
     // Connect to MongoDB database
     await connectDB();
 
-    server = app.listen(PORT, () => {
+    server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`=========================================`);
       console.log(`🚀 StudyVault Backend API Server`);
       console.log(`📡 URL: http://localhost:${PORT}`);

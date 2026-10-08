@@ -484,3 +484,33 @@ StudyVault implements production-grade backend hardening across all layers:
 ### Error Handling & Information Leak Prevention
 * **Production Sanitization**: Internal stack traces, database connection strings (`mongodb`), AWS credential fragments, and internal error codes are masked into generic messages for clients.
 * **Standardized JSON Responses**: Every response adheres to `{ success: boolean, message: string, data?: object }`.
+
+---
+
+## 13. Containerization & Docker Architecture (Phase 8)
+
+The StudyVault backend is packaged as an optimized, secure Docker container ready for local testing, AWS ECR registry pushes, and AWS ECS Fargate task deployments.
+
+### Multi-Stage Build Pipeline
+* **Stage 1 (dependencies)**: Utilizes `node:20-alpine`, copying only `package.json` and `package-lock.json` to execute `npm ci --omit=dev`. This isolates build tools and prevents devDependencies (such as `nodemon` and `supertest`) from bloating the image.
+* **Stage 2 (runner)**: Employs a clean `node:20-alpine` base image, copying only production `node_modules` and required application source code (`src/`).
+* **Non-Root Execution**: Runs under the official unprivileged `node` user (UID/GID 1000) rather than `root`, adhering to the principle of least privilege.
+* **Native Healthcheck**: Integrates a Docker healthcheck querying `/api/health` via Node.js native `fetch`, eliminating dependencies on external tools like `curl`.
+* **Zero Secrets in Image**: `.dockerignore` strictly excludes `.env*`, `node_modules`, test files, and repository metadata. All configuration (`MONGODB_URI`, `JWT_SECRET`, AWS credentials) is injected strictly at runtime.
+
+### Local Docker Commands
+
+#### Build Backend Image
+```bash
+docker build -t studyvault-backend ./backend
+```
+
+#### Run Container with Runtime Environment Variables
+```bash
+docker run --env-file ./backend/.env -p 5000:5000 studyvault-backend
+```
+
+#### Run via Docker Compose
+```bash
+docker compose up --build
+```
