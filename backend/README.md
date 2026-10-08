@@ -443,10 +443,44 @@ Activities represent an append-only audit trail of student actions on documents:
 
 ---
 
-## 12. Security & Ownership Summary
+## 12. Security & Hardening Architecture (Phase 7)
 
-* **Private S3**: Bucket public access is permanently blocked. Files can never be downloaded without passing ownership checks.
-* **Strict Multi-Tenant Isolation**: Queries strictly enforce `userId: req.userId`. User B can never view, favorite, download, or delete User A's documents, dashboard statistics, or activities.
-* **Non-Blocking Audit Logging**: Activity creation errors never cause primary document operations (uploads, downloads, deletes) to fail.
-* **Zero Credential Exposure**: Client applications never interact directly with AWS or possess AWS secrets.
-* **Rate Limiting & Security Headers**: Integrated Helmet protection and rate limiting shield all endpoints.
+StudyVault implements production-grade backend hardening across all layers:
+
+### Authentication & Credential Protection
+* **Anti-Enumeration Responses**: Authentication failures on login return identical generic 401 messages (`"Invalid email or password"`) for non-existent emails and wrong passwords alike.
+* **Zero Credential Exposure**: `password` and `passwordHash` are never projected or returned in any API response or database query result.
+* **Bcrypt Salt Rounds**: Passwords are hashed with bcrypt (salt rounds = 10) prior to storage.
+* **Brute-Force Rate Limiting**: Dedicated rate limiter restricts `/api/auth/register` and `/api/auth/login` to 20 attempts per 15 minutes per IP.
+
+### JWT Security & Algorithm Enforcement
+* **Algorithm Pinning**: Token generation and verification are strictly pinned to HMAC-SHA256 (`HS256`). Algorithm confusion attacks (e.g. `none` or asymmetric public key substitution) are rejected automatically.
+* **Safe Expiration**: Expirations are enforced upon verification. Expired tokens yield `401 Authentication required`.
+* **Minimal Payload**: The JWT payload contains only `userId`, minimizing information disclosure.
+
+### Authorization & IDOR Resistance
+* **Strict Tenant Isolation**: All queries and mutations strictly incorporate `userId: req.userId` extracted from the verified JWT.
+* **IDOR Protection**: Requests attempting to read, update, delete, favorite, or generate download URLs for another user's document return `404 Not Found`, without confirming document existence or revealing metadata.
+* **Ownership Tampering**: User ID parameters in request bodies (`req.body.userId`) are completely ignored during updates or creations.
+* **Isolated Analytics**: Dashboard queries and activity history are scoped exclusively to the authenticated user ID.
+
+### File Upload & S3 Security
+* **Private S3 Bucket**: All objects are stored in a private bucket with all AWS Block Public Access settings enabled.
+* **Temporary Presigned URLs**: File downloads use temporary presigned URLs expiring in 300 seconds. Clients never possess AWS credentials or direct S3 access.
+* **Path Traversal Resistance**: Uploaded file names are sanitized with `path.basename()` to strip any directory traversal attempts (`../../evil`).
+* **S3 Key Generation**: S3 keys follow `users/{userId}/{uuid}.{ext}` where file extensions are strictly sanitized (`.replace(/[^a-z0-9.]/g, '')`), preventing bucket path escape.
+* **MIME & Extension Whitelist**: Strict dual validation against 7 allowed extensions and MIME types. Max file size capped at 10 MB.
+* **Malformed Request Handling**: Null bytes, invalid multipart headers, and oversized files are rejected cleanly with `400 Bad Request`.
+
+### HTTP Security Headers & CORS
+* **Helmet**: Secures HTTP response headers with `frameguard: { action: 'deny' }` (anti-clickjacking), `xContentTypeOptions: true` (anti-MIME-sniffing), and hides `X-Powered-By`.
+* **CORS Whitelist**: Configured to accept requests from `FRONTEND_URL` / `CLIENT_URL` (e.g., `http://localhost:5173`) while blocking unapproved origins in production.
+
+### Query & Input Safety
+* **Regex / ReDoS Protection**: Free-text search parameters escape special regex characters to eliminate catastrophic backtracking.
+* **Query Parameter Type Checking**: Query parameters like `action` in activity routes are strictly validated as strings to block NoSQL object-injection attacks (`?action[$gt]=`).
+* **Pagination Boundaries**: `page` and `limit` are strictly sanitized (`page >= 1`, `limit` clamped between 1 and 50).
+
+### Error Handling & Information Leak Prevention
+* **Production Sanitization**: Internal stack traces, database connection strings (`mongodb`), AWS credential fragments, and internal error codes are masked into generic messages for clients.
+* **Standardized JSON Responses**: Every response adheres to `{ success: boolean, message: string, data?: object }`.

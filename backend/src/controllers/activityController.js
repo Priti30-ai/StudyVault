@@ -14,7 +14,13 @@ export const getActivity = async (req, res, next) => {
     };
 
     if (action !== undefined) {
-      const normalizedAction = String(action).trim().toUpperCase();
+      if (typeof action !== 'string' || !action.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid action filter. Allowed actions: ${ALLOWED_ACTIONS.join(', ')}`
+        });
+      }
+      const normalizedAction = action.trim().toUpperCase();
       if (!ALLOWED_ACTIONS.includes(normalizedAction)) {
         return res.status(400).json({
           success: false,
@@ -25,7 +31,8 @@ export const getActivity = async (req, res, next) => {
     }
 
     const parsedPage = Math.max(1, parseInt(page, 10) || 1);
-    const parsedLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
+    const rawLimit = parseInt(limit, 10);
+    const parsedLimit = isNaN(rawLimit) || rawLimit <= 0 ? 10 : Math.min(50, rawLimit);
     const skip = (parsedPage - 1) * parsedLimit;
 
     const total = await Activity.countDocuments(queryFilter);

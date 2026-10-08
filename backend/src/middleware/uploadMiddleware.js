@@ -27,6 +27,12 @@ export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
+  if (!file.originalname || file.originalname.includes('\0')) {
+    const error = new Error('File name contains invalid characters');
+    error.statusCode = 400;
+    return cb(error, false);
+  }
+
   const ext = path.extname(file.originalname).toLowerCase();
   const mime = file.mimetype.toLowerCase();
 

@@ -42,9 +42,10 @@ const isMockDevMode = () => {
  * @returns {string} S3 object key
  */
 export const generateS3Key = (userId, originalFileName) => {
-  const ext = path.extname(originalFileName).toLowerCase();
+  const rawExt = path.extname(originalFileName || '').toLowerCase();
+  const cleanExt = rawExt.replace(/[^a-z0-9.]/g, '');
   const uniqueId = crypto.randomUUID();
-  return `users/${userId}/${uniqueId}${ext}`;
+  return `users/${userId}/${uniqueId}${cleanExt}`;
 };
 
 /**

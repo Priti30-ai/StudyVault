@@ -72,7 +72,7 @@ export const createDocument = async (req, res, next) => {
       });
     }
 
-    const originalFileName = req.file.originalname;
+    const originalFileName = path.basename(req.file.originalname).trim() || 'document.pdf';
     const mimeType = req.file.mimetype;
     const fileSize = req.file.size;
     const fileType = path.extname(originalFileName).replace('.', '').toLowerCase();
@@ -160,19 +160,24 @@ export const getDocuments = async (req, res, next) => {
     }
 
     if (subject && typeof subject === 'string' && subject.trim()) {
-      queryFilter.subject = new RegExp(`^${escapeRegex(subject.trim())}$`, 'i');
+      const cleanSubject = subject.trim().slice(0, 100);
+      queryFilter.subject = new RegExp(`^${escapeRegex(cleanSubject)}$`, 'i');
     }
 
     if (semester && typeof semester === 'string' && semester.trim()) {
-      queryFilter.semester = semester.trim();
+      queryFilter.semester = semester.trim().slice(0, 50);
     }
 
     if (category && typeof category === 'string' && category.trim()) {
-      queryFilter.category = category.trim();
+      const cleanCat = category.trim();
+      if (ALLOWED_CATEGORIES.includes(cleanCat)) {
+        queryFilter.category = cleanCat;
+      }
     }
 
     if (search && typeof search === 'string' && search.trim()) {
-      const searchRegex = new RegExp(escapeRegex(search.trim()), 'i');
+      const cleanSearch = search.trim().slice(0, 100);
+      const searchRegex = new RegExp(escapeRegex(cleanSearch), 'i');
       queryFilter.$or = [
         { originalFileName: searchRegex },
         { subject: searchRegex },
@@ -181,7 +186,8 @@ export const getDocuments = async (req, res, next) => {
     }
 
     const parsedPage = Math.max(1, parseInt(page, 10) || 1);
-    const parsedLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
+    const rawLimit = parseInt(limit, 10);
+    const parsedLimit = isNaN(rawLimit) || rawLimit <= 0 ? 10 : Math.min(50, rawLimit);
     const skip = (parsedPage - 1) * parsedLimit;
 
     const total = await Document.countDocuments(queryFilter);
@@ -347,7 +353,14 @@ export const updateDocument = async (req, res, next) => {
           message: 'Original file name cannot be empty'
         });
       }
-      document.originalFileName = originalFileName.trim();
+      const cleanName = path.basename(originalFileName.trim());
+      if (cleanName.length > 255) {
+        return res.status(400).json({
+          success: false,
+          message: 'Original file name cannot exceed 255 characters'
+        });
+      }
+      document.originalFileName = cleanName;
     }
 
     if (subject !== undefined) {
@@ -357,7 +370,14 @@ export const updateDocument = async (req, res, next) => {
           message: 'Subject cannot be empty'
         });
       }
-      document.subject = subject.trim();
+      const cleanSubject = subject.trim();
+      if (cleanSubject.length > 100) {
+        return res.status(400).json({
+          success: false,
+          message: 'Subject cannot exceed 100 characters'
+        });
+      }
+      document.subject = cleanSubject;
     }
 
     if (semester !== undefined) {
@@ -367,7 +387,14 @@ export const updateDocument = async (req, res, next) => {
           message: 'Semester cannot be empty'
         });
       }
-      document.semester = semester.trim();
+      const cleanSemester = semester.trim();
+      if (cleanSemester.length > 50) {
+        return res.status(400).json({
+          success: false,
+          message: 'Semester cannot exceed 50 characters'
+        });
+      }
+      document.semester = cleanSemester;
     }
 
     if (category !== undefined) {
