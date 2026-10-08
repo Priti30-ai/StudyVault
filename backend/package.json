@@ -1,0 +1,31 @@
+{
+  "name": "studyvault-backend",
+  "version": "1.0.0",
+  "description": "Backend API for StudyVault - Cloud-Based Academic Document & Notes Management System",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "test": "echo \"Error: no test specified yet\" && exit 0"
+  },
+  "keywords": [
+    "studyvault",
+    "express",
+    "nodejs",
+    "api"
+  ],
+  "author": "StudyVault Team",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "morgan": "^1.10.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
