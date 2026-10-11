@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Production build artifacts
+dist/
+dist-ssr/
+
+# Environment files
+.env
+.env.local
+.env.*
+!.env.example
+
+# Logs & OS artifacts
+*.log
+.DS_Store
+Thumbs.db
