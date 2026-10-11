@@ -1,10 +1,13 @@
 # Dependencies
 node_modules/
 
-# Environment Variables
+# Environment Variables and Secrets
 .env
 .env.local
 .env.production
+.env.*
+*.pem
+*.key
 
 # Logs
 logs/

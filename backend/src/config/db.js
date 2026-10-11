@@ -12,6 +12,12 @@ export const connectDB = async () => {
     throw new Error('MONGODB_URI environment variable is required');
   }
 
+  // Prevent production environment from silently targeting a local database
+  if (process.env.NODE_ENV === 'production' && (uri.includes('localhost') || uri.includes('127.0.0.1'))) {
+    console.error('❌ MONGODB_URI cannot point to localhost/127.0.0.1 in production mode.');
+    throw new Error('MONGODB_URI cannot point to localhost/127.0.0.1 in production mode. Please provide a cloud database URI (e.g., MongoDB Atlas).');
+  }
+
   try {
     const conn = await mongoose.connect(uri);
     console.log(`📦 MongoDB Connected: ${conn.connection.host}`);

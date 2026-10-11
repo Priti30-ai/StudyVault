@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files and credentials
+.env
+.env.*
+backend/.env
+backend/.env.*
+*.pem
+*.key
+!.env.example
+!backend/.env.example
+
+# Git metadata
+.git/
+.gitignore
+
+# Tests and Coverage
+tests/
+backend/tests/
+coverage/
+
+# Logs & temp files
+logs/
+*.log
+.DS_Store
+Thumbs.db

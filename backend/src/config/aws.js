@@ -1,6 +1,6 @@
 import { S3Client } from '@aws-sdk/client-s3';
 
-const region = process.env.AWS_REGION || 'ap-south-1';
+const region = process.env.AWS_REGION || 'ap-southeast-2';
 const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
 const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
 
@@ -9,7 +9,7 @@ const clientConfig = {
 };
 
 // If explicit credentials are provided in env, use them;
-// otherwise AWS SDK falls back to IAM Task Roles (ideal for ECS Fargate).
+// otherwise AWS SDK falls back to IAM Instance Profile / Task Roles (ideal for EC2 / ECS).
 if (accessKeyId && secretAccessKey) {
   clientConfig.credentials = {
     accessKeyId,

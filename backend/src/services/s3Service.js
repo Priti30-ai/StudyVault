@@ -29,8 +29,9 @@ export const getS3Mock = () => s3Mock;
  */
 const isMockDevMode = () => {
   return (
-    process.env.AWS_ACCESS_KEY_ID === 'mock_dev_access_key' ||
-    process.env.AWS_ACCESS_KEY_ID === 'your_access_key_id'
+    process.env.NODE_ENV !== 'production' &&
+    (process.env.AWS_ACCESS_KEY_ID === 'mock_dev_access_key' ||
+      process.env.AWS_ACCESS_KEY_ID === 'your_access_key_id')
   );
 };
 
@@ -62,7 +63,7 @@ export const uploadFile = async ({ fileBuffer, originalFileName, mimeType, userI
     return s3Mock.uploadFile({ fileBuffer, originalFileName, mimeType, userId });
   }
 
-  const bucket = process.env.AWS_S3_BUCKET || 'studyvault-bucket';
+  const bucket = process.env.AWS_S3_BUCKET || 'studyvault-priti-documents-2026';
   const s3Key = generateS3Key(userId, originalFileName);
 
   // Local development fallback if real AWS credentials are not configured yet
@@ -95,7 +96,7 @@ export const deleteFile = async (s3Key) => {
     return s3Mock.deleteFile(s3Key);
   }
 
-  const bucket = process.env.AWS_S3_BUCKET || 'studyvault-bucket';
+  const bucket = process.env.AWS_S3_BUCKET || 'studyvault-priti-documents-2026';
 
   // Local development fallback
   if (isMockDevMode()) {
@@ -122,8 +123,8 @@ export const generateDownloadUrl = async (s3Key, expiresIn = 300) => {
     return s3Mock.generateDownloadUrl(s3Key, expiresIn);
   }
 
-  const bucket = process.env.AWS_S3_BUCKET || 'studyvault-bucket';
-  const region = process.env.AWS_REGION || 'ap-south-1';
+  const bucket = process.env.AWS_S3_BUCKET || 'studyvault-priti-documents-2026';
+  const region = process.env.AWS_REGION || 'ap-southeast-2';
 
   // Local development fallback
   if (isMockDevMode()) {

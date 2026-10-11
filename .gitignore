@@ -1,8 +1,12 @@
-# Environment Variables
+# Environment Variables and Secrets
 .env
 .env.*
 backend/.env
 backend/.env.*
+*.pem
+*.key
+*.crt
+*.cer
 
 # Dependencies
 node_modules/
