@@ -10,8 +10,8 @@ RUN npm ci
 
 COPY . ./
 
-# Build-time argument for Vite client API endpoint
-ARG VITE_API_URL=http://3.106.220.253:5000
+# Build-time argument for Vite client API endpoint (defaults to empty for same-origin proxy)
+ARG VITE_API_URL=""
 ENV VITE_API_URL=$VITE_API_URL
 
 # Build the Vite production bundle

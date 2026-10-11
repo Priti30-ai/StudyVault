@@ -199,7 +199,7 @@ const MainContent = () => {
             © 2026 StudyVault — Cloud Computing Mini-Project. Built with React, Express, MongoDB Atlas & AWS S3.
           </div>
           <div style={{ display: 'flex', gap: '1rem' }}>
-            <span>EC2: <code style={{ color: '#94a3b8' }}>3.106.220.253:5000</code></span>
+            <span>Domain: <code style={{ color: '#94a3b8' }}>studyvault-priti.duckdns.org</code></span>
             <span>Region: <code style={{ color: '#94a3b8' }}>ap-southeast-2</code></span>
           </div>
         </div>

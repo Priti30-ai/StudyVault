@@ -3,8 +3,8 @@
  * Connects to AWS EC2 Express Backend API
  */
 
-// Base API URL injected via Vite env, falling back to deployed EC2 endpoint
-const RAW_API_URL = import.meta.env.VITE_API_URL || 'http://3.106.220.253:5000';
+// Base API URL injected via Vite env, defaulting to relative path for same-origin Nginx proxying
+const RAW_API_URL = import.meta.env.VITE_API_URL !== undefined ? import.meta.env.VITE_API_URL : '';
 export const API_BASE = RAW_API_URL.replace(/\/+$/, '');
 
 const TOKEN_KEY = 'studyvault_auth_token';

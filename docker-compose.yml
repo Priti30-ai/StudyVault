@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: studyvault-backend
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     env_file:
       - ./backend/.env
     restart: unless-stopped
@@ -15,10 +15,22 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - VITE_API_URL=http://3.106.220.253:5000
+        VITE_API_URL: ""
     container_name: studyvault-frontend
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      - certbot-webroot:/var/www/certbot
+      - letsencrypt-data:/etc/letsencrypt:ro
     restart: unless-stopped
     depends_on:
       - backend
+
+volumes:
+  certbot-webroot:
+    external: true
+    name: studyvault_certbot-webroot
+  letsencrypt-data:
+    external: true
+    name: studyvault_letsencrypt-data

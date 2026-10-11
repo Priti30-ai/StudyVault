@@ -27,6 +27,7 @@ app.use(
 const allowedOrigins = [
   process.env.CLIENT_URL,
   process.env.FRONTEND_URL,
+  'https://studyvault-priti.duckdns.org',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://3.106.220.253'
