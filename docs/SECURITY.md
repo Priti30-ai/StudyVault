@@ -23,10 +23,14 @@ StudyVault implements a defense-in-depth security model across the application, 
 
 ## 3. Chrome Deceptive Site Warning — Forensic Incident Analysis
 
-### 3.1 Incident Description
+### 3.1 Incident Description & Live Verification
 During browser authentication on `https://studyvault-priti.duckdns.org`, Google Chrome displayed:
 > *"You just entered your password on a deceptive site. To secure your accounts, Chrome recommends checking your saved passwords."*
 accompanied by a red "Dangerous" badge in the browser address bar.
+
+Live verification on the **Google Safe Browsing Transparency Report** confirmed the official status:
+- **Verdict:** *"Some pages on this site are unsafe"*
+- **Classification Details:** *"The site studyvault-priti.duckdns.org contains harmful content, including pages that try to trick visitors into sharing personal info or downloading software."*
 
 ### 3.2 Forensic Audit Findings
 A comprehensive static code analysis and server audit yielded the following conclusions:
@@ -73,23 +77,24 @@ To resolve the domain flag through official Google channels:
 
 ## 4. Cloud Infrastructure Security
 
-### 4.1 AWS IAM Least Privilege
-- The EC2 instance assumes `StudyVaultEC2Role` through an EC2 Instance Profile.
-- The attached policy `StudyVaultS3Policy` grants only the minimal permissions required for document management:
+### 4.1 AWS IAM Least Privilege (Live Verified)
+- The EC2 instance (`i-05151c96b878e27d4`) assumes `StudyVaultEC2Role` through an EC2 Instance Profile:
+  - **Instance Profile ARN:** `arn:aws:iam::366366122474:instance-profile/StudyVaultEC2Role`
+  - **Assumed Role ARN:** `arn:aws:sts::366366122474:assumed-role/StudyVaultEC2Role/i-05151c96b878e27d4`
+- The attached policy grants strictly the minimal object-level permissions required for document operations:
   - `s3:PutObject`
   - `s3:GetObject`
   - `s3:DeleteObject`
-  - `s3:ListBucket`
-  Scoped strictly to the resource ARN: `arn:aws:s3:::studyvault-priti-documents-2026/*`.
-- Administrative S3 permissions (`PutBucketPolicy`, `DeleteBucket`, `PutBucketAcl`) are intentionally denied.
+  - `s3:ListBucket` (scoped to `studyvault-priti-documents-2026/users/`)
+- Administrative S3 permissions (`GetBucketLocation`, `GetBucketPublicAccessBlock`, `GetEncryptionConfiguration`, `PutBucketPolicy`) are intentionally denied.
 
-### 4.2 Security Group Firewall Configuration
-- Inbound:
-  - Port 22 (SSH): Restricted to authorized administrator IP addresses.
-  - Port 80 (HTTP): Open for Let's Encrypt renewal challenges and HTTP-to-HTTPS redirect.
-  - Port 443 (HTTPS): Open to public web traffic for secure TLS access.
-  - Port 5000: **Closed** to external traffic; backend is accessed exclusively through the internal Nginx reverse proxy.
-- Outbound: All traffic allowed for S3 API calls, MongoDB Atlas connections, and system updates.
+### 4.2 Security Group & Network Firewall Configuration
+- **Inbound Rules:**
+  - Port 22 (SSH): Restricted to authorized administrator IP.
+  - Port 80 (HTTP): Open (`0.0.0.0/0`) for Let's Encrypt renewal challenges and HTTP-to-HTTPS redirect.
+  - Port 443 (HTTPS): Open (`0.0.0.0/0`) to public web traffic for secure TLS access.
+  - Port 5000: Bound strictly to `127.0.0.1:5000:5000` on the EC2 host via `docker-compose.yml`. Even if a cloud security group inadvertently allows port 5000, external traffic cannot connect to the backend because it listens only on localhost loopback. All external API requests must enter via the Nginx reverse proxy over HTTPS.
+- **Outbound Rules:** All traffic allowed for S3 API calls, MongoDB Atlas connections, and system updates.
 
 ---
 

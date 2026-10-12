@@ -125,15 +125,54 @@ Certificates are mounted into the frontend container from external Docker volume
 - `studyvault_certbot-webroot` &rarr; `/var/www/certbot`
 - `studyvault_letsencrypt-data` &rarr; `/etc/letsencrypt`
 
-### 6.1 Testing Certificate Renewal
+### 6.1 Testing Certificate Renewal (Containerized)
+Because Certbot runs in a dedicated Docker image on Amazon Linux 2023 without host dependencies:
 ```bash
-# Dry run renewal check
-sudo certbot renew --dry-run --webroot -w /var/lib/docker/volumes/studyvault_certbot-webroot/_data
+# Dry run renewal check using existing Docker volumes
+docker run --rm \
+  -v studyvault_certbot-webroot:/var/www/certbot \
+  -v studyvault_letsencrypt-data:/etc/letsencrypt \
+  certbot/certbot renew --dry-run
 ```
 
 ### 6.2 Reloading Nginx after Renewal
 ```bash
-docker-compose exec frontend nginx -s reload
+docker exec studyvault-frontend nginx -s reload
+```
+
+### 6.3 Automated Renewal Setup via Systemd Timer (Amazon Linux 2023)
+Create the systemd service `/etc/systemd/system/certbot-renew.service`:
+```ini
+[Unit]
+Description=Certbot Automated TLS Renewal for StudyVault
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker run --rm -v studyvault_certbot-webroot:/var/www/certbot -v studyvault_letsencrypt-data:/etc/letsencrypt certbot/certbot renew --webroot -w /var/www/certbot --quiet
+ExecStartPost=/usr/bin/docker exec studyvault-frontend nginx -s reload
+```
+
+Create the companion timer `/etc/systemd/system/certbot-renew.timer`:
+```ini
+[Unit]
+Description=Bi-monthly Timer for StudyVault TLS Renewal
+
+[Timer]
+OnCalendar=*-*-01,15 03:00:00
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable and start the timer:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now certbot-renew.timer
+sudo systemctl list-timers --no-pager | grep certbot
 ```
 
 ---
